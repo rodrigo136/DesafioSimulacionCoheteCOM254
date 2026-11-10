@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simulador de lanzamiento de cohete — Método de Euler</title>
+<style>
+:root{--ink:#17212b;--muted:#637181;--line:#d8dee6;--paper:#fff;--soft:#f4f6f8;--accent:#245b86}
+*{box-sizing:border-box}body{margin:0;background:#eef1f4;color:var(--ink);font:15px/1.5 Arial,Helvetica,sans-serif}
+header{background:#183b56;color:white;padding:26px max(20px,calc((100% - 1180px)/2))}
+header h1{margin:0 0 5px;font-size:25px}header p{margin:0;color:#dce7ef}
+main{max-width:1180px;margin:22px auto;padding:0 16px}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+h2{font-size:19px;margin:0 0 12px}h3{font-size:16px;margin:0 0 8px}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px}
+label{display:block;font-size:13px;font-weight:bold;color:#334454;margin-bottom:4px}
+input{width:100%;padding:9px;border:1px solid #bfc9d3;border-radius:6px;font-size:15px}
+small,.muted{color:var(--muted)}.actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}
+button,.download{border:0;border-radius:6px;padding:10px 15px;background:var(--accent);color:white;font-weight:bold;cursor:pointer;text-decoration:none}
+button.secondary,.download.secondary{background:#e7edf2;color:#23394b;border:1px solid #cbd5df}
+button:hover,.download:hover{filter:brightness(.95)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.stat{background:var(--soft);border:1px solid var(--line);padding:12px;border-radius:7px}
+.stat span{display:block;color:var(--muted);font-size:12px}.stat strong{font-size:21px}
+.chartwrap{height:330px;position:relative}canvas{width:100%;height:100%;display:block}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;margin:5px 0 12px}.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px}
+.tablewrap{overflow:auto;max-height:490px;border:1px solid var(--line)}
+table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}
+th,td{padding:7px 9px;text-align:right;border-bottom:1px solid #e4e8ec}
+th{position:sticky;top:0;background:#edf1f4;z-index:1}th:first-child,td:first-child{text-align:center}
+.note{font-size:13px;background:#f7f8fa;border-left:3px solid #8ca5b8;padding:10px 12px}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:12px}
+@media(max-width:600px){header h1{font-size:21px}.panel{padding:13px}.chartwrap{height:260px}}
+</style>
+</head>
+<body>
+<header>
+<h1>Simulador de lanzamiento de cohete</h1>
+<p>Método de Euler explícito frente a solución analítica · Modelo vertical simplificado</p>
+</header>
+<main>
+<section class="panel">
+<h2>1. Parámetros del modelo</h2>
+<div class="formgrid">
+<div><label for="mass">Masa m (kg)</label><input id="mass" type="number" min="0.000001" step="any" value="1000"></div>
+<div><label for="thrust">Empuje T (N)</label><input id="thrust" type="number" min="0" step="any" value="15000"></div>
+<div><label for="gravity">Gravedad g (m/s²)</label><input id="gravity" type="number" min="0" step="any" value="9.81"></div>
+<div><label for="drag">Coeficiente k (kg/s)</label><input id="drag" type="number" min="0" step="any" value="100"></div>
+<div><label for="v0">Velocidad inicial v₀ (m/s)</label><input id="v0" type="number" step="any" value="0"></div>
+<div><label for="y0">Altura inicial y₀ (m)</label><input id="y0" type="number" step="any" value="0"></div>
+<div><label for="duration">Tiempo total (s)</label><input id="duration" type="number" min="0.5" step="0.5" value="20"></div>
+<div><label for="step">Paso h (s)</label><input id="step" type="number" value="0.5" readonly></div>
+</div>
+<p class="muted">El paso se mantiene fijo en 0,5 s. Con 20 segundos se realizan 40 iteraciones y se muestran 41 puntos, incluyendo t = 0.</p>
+<div class="actions">
+<button id="run">Ejecutar simulación</button>
+<button id="reset" class="secondary">Restablecer valores</button>
+<button id="csv" class="secondary">Exportar tabla CSV</button>
+</div>
+<div id="error" role="alert" style="color:#a32626;margin-top:8px"></div>
+</section>
+
+<section class="panel">
+<h2>2. Modelo matemático utilizado</h2>
+<p>Se considera un movimiento vertical con empuje constante, gravedad constante y resistencia lineal del aire proporcional a la velocidad:</p>
+<p><strong>m·dv/dt = T − mg − kv</strong></p>
+<p>Por tanto, <strong>dv/dt = a − bv</strong>, donde a = T/m − g y b = k/m. La altura cumple <strong>dy/dt = v</strong>.</p>
+<div class="note"><strong>Euler:</strong> v siguiente = v actual + h(a − bv actual); y siguiente = y actual + h·v actual.<br>
+<strong>Analítica (b ≠ 0):</strong> v(t) = v∞ + (v₀ − v∞)e<sup>−bt</sup>, con v∞ = a/b. La altura es y(t) = y₀ + v∞t + (v₀ − v∞)(1 − e<sup>−bt</sup>)/b. Si k = 0, se utiliza la solución de aceleración constante.</div>
+</section>
+
+<section class="panel">
+<h2>3. Resultados al final de la simulación</h2>
+<div class="stats" id="stats"></div>
+</section>
+
+<section class="panel">
+<h2>4. Gráficas comparativas</h2>
+<div class="legend"><span><i class="dot" style="background:#245b86"></i>Euler</span><span><i class="dot" style="background:#d47a27"></i>Solución analítica</span><span>🚀 Posición actual del cohete</span></div>
+<div class="stat" style="margin:10px 0 14px">
+ <label for="timeSlider">Mover el cohete sobre las curvas</label>
+ <input id="timeSlider" type="range" min="0" max="40" step="1" value="0" style="padding:0">
+ <div class="actions" style="margin-top:8px">
+  <button id="play" type="button">▶ Reproducir movimiento</button>
+  <button id="pause" type="button" class="secondary">Ⅱ Pausar</button>
+  <button id="start" type="button" class="secondary">↺ Volver al inicio</button>
+ </div>
+ <div id="liveData" class="stats" style="margin-top:12px"></div>
+ <small>El cohete se desplaza por la curva de Euler. Los datos muestran simultáneamente Euler y la solución analítica en el instante seleccionado.</small>
+</div>
+<h3>Velocidad respecto al tiempo</h3><div class="chartwrap"><canvas id="velocityChart"></canvas></div>
+<h3 style="margin-top:18px">Altura respecto al tiempo</h3><div class="chartwrap"><canvas id="heightChart"></canvas></div>
+<p class="muted">Pasa el cursor sobre los gráficos para consultar el tiempo y los valores de ambas soluciones.</p>
+</section>
+
+<section class="panel">
+<h2>5. Tabla de iteraciones y comparación</h2>
+<div class="tablewrap"><table id="results"><thead></thead><tbody></tbody></table></div>
+</section>
+
+<section class="panel">
+<h2>6. Interpretación y limitaciones</h2>
+<p id="interpretation"></p>
+<div class="note">Este simulador es educativo. Supone masa, empuje, gravedad y coeficiente de resistencia constantes, movimiento vertical y resistencia lineal kv. Un cohete real pierde masa al consumir combustible, cambia su empuje, y la resistencia atmosférica depende de la velocidad, densidad del aire y forma. Por eso, estos resultados no sirven para diseñar ni autorizar un lanzamiento real.</div>
+</section>
+<section class="panel">
+<h2>7. Conclusiones</h2>
+<ol>
+ <li>El método de Euler permite aproximar la velocidad y la altura del cohete mediante cálculos sucesivos de 0,5 segundos.</li>
+ <li>La solución analítica proporciona valores de referencia para evaluar el error de la aproximación numérica.</li>
+ <li>Al reducir el tamaño del paso, normalmente disminuyen los errores de Euler, aunque aumenta el número de iteraciones.</li>
+ <li>La animación permite relacionar cada punto de las gráficas con el tiempo, la velocidad y la altura calculados.</li>
+ <li>El modelo representa un caso académico simplificado; no predice un lanzamiento real porque no considera el consumo de combustible, el empuje variable ni la aerodinámica completa.</li>
+</ol>
+<p><strong>Conclusión general:</strong> los métodos numéricos convierten un modelo matemático en una simulación que permite analizar el movimiento, comparar aproximaciones y tomar decisiones fundamentadas sobre la precisión del cálculo.</p>
+</section>
+<footer>Simulador académico de Métodos Numéricos · Modelo idealizado de ascenso vertical</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let currentRows=[]; let activeIndex=0; let playTimer=null;
+function num(id){return Number($(id).value)}
+function fmt(x,d=4){return Number(x).toFixed(d)}
+function solve(){
+ $('error').textContent='';
+ const p={m:num('mass'),T:num('thrust'),g:num('gravity'),k:num('drag'),v0:num('v0'),y0:num('y0'),end:num('duration'),h:.5};
+ if(!Number.isFinite(p.m)||p.m<=0||p.T<0||p.g<0||p.k<0||!Number.isFinite(p.v0)||!Number.isFinite(p.y0)||p.end<=0||Math.abs(p.end/p.h-Math.round(p.end/p.h))>1e-9){
+  $('error').textContent='Verifica los datos: masa mayor que cero, empuje/gravedad/k no negativos y tiempo total múltiplo de 0,5 s.';return;
+ }
+ const a=p.T/p.m-p.g,b=p.k/p.m,N=Math.round(p.end/p.h);
+ function exact(t){
+  if(Math.abs(b)<1e-14)return {v:p.v0+a*t,y:p.y0+p.v0*t+.5*a*t*t};
+  const vinf=a/b,e=Math.exp(-b*t);
+  return {v:vinf+(p.v0-vinf)*e,y:p.y0+vinf*t+(p.v0-vinf)*(1-e)/b};
+ }
+ let v=p.v0,y=p.y0,rows=[];
+ for(let i=0;i<=N;i++){
+  const t=i*p.h,ex=exact(t);
+  rows.push({i,t,vE:v,yE:y,vA:ex.v,yA:ex.y,ev:Math.abs(v-ex.v),ey:Math.abs(y-ex.y)});
+  if(i<N){const old=v;y=y+p.h*old;v=v+p.h*(a-b*old);}
+ }
+ currentRows=rows;renderStats(rows[rows.length-1],p,N);renderTable(rows);draw('velocityChart',rows,'vE','vA','Velocidad (m/s)');draw('heightChart',rows,'yE','yA','Altura (m)');
+ $('interpretation').textContent=`Con h = 0,5 s se realizaron ${N} iteraciones. Al final, Euler calcula v = ${fmt(rows[N].vE)} m/s y y = ${fmt(rows[N].yE)} m. La solución analítica calcula v = ${fmt(rows[N].vA)} m/s y y = ${fmt(rows[N].yA)} m. Los errores absolutos son ${fmt(rows[N].ev)} m/s en velocidad y ${fmt(rows[N].ey)} m en altura.`;
+}
+function renderStats(r,p,N){
+ const items=[['Iteraciones',N],['Velocidad Euler',fmt(r.vE)+' m/s'],['Velocidad analítica',fmt(r.vA)+' m/s'],['Altura Euler',fmt(r.yE)+' m'],['Altura analítica',fmt(r.yA)+' m'],['Error final de altura',fmt(r.ey)+' m']];
+ $('stats').innerHTML=items.map(x=>`<div class="stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
+}
+function renderTable(rows){
+ $('results').innerHTML='<thead><tr><th>n</th><th>t (s)</th><th>v Euler (m/s)</th><th>y Euler (m)</th><th>v analítica (m/s)</th><th>y analítica (m)</th><th>Error v</th><th>Error y</th></tr></thead><tbody>'+
+ rows.map(r=>`<tr><td>${r.i}</td><td>${fmt(r.t,2)}</td><td>${fmt(r.vE)}</td><td>${fmt(r.yE)}</td><td>${fmt(r.vA)}</td><td>${fmt(r.yA)}</td><td>${fmt(r.ev)}</td><td>${fmt(r.ey)}</td></tr>`).join('')+'</tbody>';
+}
+function draw(id,rows,key1,key2,label){
+ const c=$(id),ctx=c.getContext('2d'),rect=c.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+ c.width=rect.width*dpr;c.height=rect.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);
+ const W=rect.width,H=rect.height,L=62,R=18,T=18,B=42,pw=W-L-R,ph=H-T-B;
+ const vals=rows.flatMap(r=>[r[key1],r[key2]]),min=Math.min(0,...vals),max=Math.max(1,...vals),pad=(max-min)*.1||1,lo=min-pad,hi=max+pad;
+ const X=t=>L+t/rows[rows.length-1].t*pw,Y=v=>T+(hi-v)/(hi-lo)*ph;
+ ctx.clearRect(0,0,W,H);ctx.font='11px Arial';ctx.strokeStyle='#dce2e8';ctx.fillStyle='#536171';ctx.lineWidth=1;
+ for(let j=0;j<=5;j++){let val=lo+(hi-lo)*j/5,yy=Y(val);ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(W-R,yy);ctx.stroke();ctx.textAlign='right';ctx.fillText(val.toFixed(1),L-7,yy+4);}
+ for(let j=0;j<=5;j++){let t=rows[rows.length-1].t*j/5,xx=X(t);ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,H-B);ctx.stroke();ctx.textAlign='center';ctx.fillText(t.toFixed(0),xx,H-B+17);}
+ ctx.textAlign='center';ctx.fillText('Tiempo (s)',L+pw/2,H-7);
+ [[key1,'#245b86'],[key2,'#d47a27']].forEach(([key,color])=>{ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2;rows.forEach((r,i)=>{let x=X(r.t),y=Y(r[key]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();rows.forEach(r=>{ctx.beginPath();ctx.fillStyle=color;ctx.arc(X(r.t),Y(r[key]),2.2,0,Math.PI*2);ctx.fill()})});
+ const selected=rows[Math.min(activeIndex,rows.length-1)];
+ const rx=X(selected.t), ry=Y(selected[key1]);
+ // Cohete dibujado en el punto actual de la curva de Euler
+ ctx.save();ctx.translate(rx,ry-12);ctx.rotate(0);
+ ctx.fillStyle='#263746';ctx.strokeStyle='#ffffff';ctx.lineWidth=1.5;
+ ctx.beginPath();ctx.moveTo(0,-11);ctx.quadraticCurveTo(8,-3,6,6);ctx.lineTo(-6,6);ctx.quadraticCurveTo(-8,-3,0,-11);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#e3a23b';ctx.beginPath();ctx.moveTo(-4,5);ctx.lineTo(0,13);ctx.lineTo(4,5);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#8ec5e8';ctx.beginPath();ctx.arc(0,-1,2.5,0,Math.PI*2);ctx.fill();
+ ctx.restore();
+ ctx.beginPath();ctx.arc(rx,ry,5,0,Math.PI*2);ctx.strokeStyle='#17212b';ctx.lineWidth=2;ctx.stroke();
+ c._plot={rows,X,Y,key1,key2,label,L,T,pw,ph};
+ c.onmousemove=e=>{const q=c._plot,rc=c.getBoundingClientRect(),mx=e.clientX-rc.left;let t=(mx-q.L)/q.pw*rows[rows.length-1].t;let i=Math.max(0,Math.min(rows.length-1,Math.round(t/.5))),r=rows[i];c.title=`t=${fmt(r.t,2)} s | Euler: ${fmt(r[key1])} | Analítica: ${fmt(r[key2])}`};
+}
+
+function updateAnimation(){
+ if(!currentRows.length)return;
+ activeIndex=Math.max(0,Math.min(currentRows.length-1,Number($('timeSlider').value)));
+ const r=currentRows[activeIndex];
+ $('liveData').innerHTML=[
+  ['Tiempo',fmt(r.t,2)+' s'],
+  ['Velocidad Euler',fmt(r.vE)+' m/s'],
+  ['Velocidad analítica',fmt(r.vA)+' m/s'],
+  ['Altura Euler',fmt(r.yE)+' m'],
+  ['Altura analítica',fmt(r.yA)+' m']
+ ].map(x=>`<div class="stat"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
+ draw('velocityChart',currentRows,'vE','vA','Velocidad (m/s)');
+ draw('heightChart',currentRows,'yE','yA','Altura (m)');
+}
+function stopAnimation(){if(playTimer){clearInterval(playTimer);playTimer=null;}}
+function playAnimation(){
+ if(!currentRows.length)return;
+ stopAnimation();
+ if(activeIndex>=currentRows.length-1){$('timeSlider').value=0;activeIndex=0;updateAnimation();}
+ playTimer=setInterval(()=>{
+  if(activeIndex>=currentRows.length-1){stopAnimation();return;}
+  $('timeSlider').value=activeIndex+1;updateAnimation();
+ },180);
+}
+$('timeSlider').addEventListener('input',()=>{stopAnimation();updateAnimation();});
+$('play').addEventListener('click',playAnimation);
+$('pause').addEventListener('click',stopAnimation);
+$('start').addEventListener('click',()=>{stopAnimation();$('timeSlider').value=0;updateAnimation();});
+$('run').addEventListener('click',()=>{stopAnimation();solve();$('timeSlider').max=currentRows.length-1;$('timeSlider').value=0;activeIndex=0;updateAnimation();});
+
+$('reset').addEventListener('click',()=>{Object.entries({mass:1000,thrust:15000,gravity:9.81,drag:100,v0:0,y0:0,duration:20}).forEach(([k,v])=>$(k).value=v);solve()});
+$('csv').addEventListener('click',()=>{if(!currentRows.length)return;const header=['Iteracion','Tiempo_s','Velocidad_Euler_m_s','Altura_Euler_m','Velocidad_analitica_m_s','Altura_analitica_m','Error_velocidad','Error_altura'];const lines=[header.join(';'),...currentRows.map(r=>[r.i,r.t,r.vE,r.yE,r.vA,r.yA,r.ev,r.ey].join(';'))];const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8;'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='resultados_lanzamiento_euler.csv';a.click();URL.revokeObjectURL(a.href)});
+window.addEventListener('resize',()=>{if(currentRows.length){draw('velocityChart',currentRows,'vE','vA','Velocidad');draw('heightChart',currentRows,'yE','yA','Altura')}});
+solve(); $('timeSlider').max=currentRows.length-1; updateAnimation();
+</script>
+</body>
+</html>
